@@ -1,0 +1,5 @@
+﻿  Taki.c
+C:\Users\Amir\source\repos\Taki\Taki\Taki.c(6,12): warning C4013: 'time' undefined; assuming extern returning int
+C:\Users\Amir\source\repos\Taki\Taki\Taki.c(37,51): warning C4047: '!=': 'Card *' differs in levels of indirection from 'int'
+C:\Users\Amir\source\repos\Taki\Taki\Taki.c(8,9): warning C4101: 'organizedGreens': unreferenced local variable
+  Taki.vcxproj -> C:\Users\Amir\source\repos\Taki\x64\Debug\Taki.exe
