@@ -10,6 +10,8 @@
 
 //defines
 #define _CRT_SECURE_NO_WARNINGS
+#define EMPTY 0
+#define CLOSE_TAKI 0
 //maximums
 #define MAX_NAME_LEN 20
 #define PACK_SIZE_IN_START 4
@@ -38,7 +40,8 @@ typedef struct Card {
 
 typedef struct Player {
 	char name[MAX_NAME_LEN];
-	int packSize;
+	int logPackSize;
+	int phyPackSize;
 	Card* pack;
 }Player;
 
@@ -51,13 +54,13 @@ typedef struct GameInfo {
 
 //functions
 void getGameInfo(GameInfo* gameInfoP);
+void freeAll(GameInfo* gameInfoP);
+void checkIfAllocationSuccessful(void* pointer);
 int getNumOfPlayers();
 void getPlayersInfo(GameInfo* game);
 void givePlayerNewPack(Player* player);
-Card createCard();
+Card createNewCard();
 char getRandomCardColor();
-int getRandomCardNum();
-int getRandomSpecialCardType();
 void printPack(Player* player);
 void printCard(Card* card);
 Card createStartingCard();
@@ -65,17 +68,15 @@ void updateCurrentTurn(GameInfo* gameInfoP);
 void advanceTurnToNextPlayer(GameInfo* gameInfoP);
 void presentActivePlayerAndUpperCard(Player* activePlayer, Card* upperCard);
 int getCardChoice(int numOfChoices);
-void takeCardFromDeck(Player* activePlayer);
+void getCardFromDeck(Player* activePlayer);
 bool isMoveValid(Card chosenCard, Card* upperCard);
-void makeSpecialCardMove(GameInfo* gameInfoP, Card* upperCard);
-void changeDirectionOfGame(GameInfo* gameInfoP);
+void makeSpecialCardMove(GameInfo* gameInfoP, Card** upperCard);
 void givePlayerAnotherTurn(GameInfo* gameInfoP);
 void stopNextPlayer(GameInfo* gameInfoP);
-void changeColorOfGame(GameInfo* gameInfoP, Card* upperCard);
-void openTaki(GameInfo* gameInfoP, Card* upperCard);
+void changeColorOfGame(GameInfo* gameInfoP, Card** upperCard);
+void openTaki(GameInfo* gameInfoP, Card** upperCard);
 void putChosenCardOnTopOfDeck(Player* activePlayer, int cardChoice, Card** upperCard);
 void swapCardsInPack(Card pack[], int index1, int index2);
-void copyCard(Card* destCard,Card sourceCard);
 
 int main()
 {
@@ -88,7 +89,7 @@ int main()
 	getGameInfo(&gameInfo);
 	activePlayer = &(gameInfo.allPlayers[gameInfo.currentTurn]);
 	//start the game
-	while (activePlayer->packSize != 0)
+	while (activePlayer->logPackSize != 0)
 	{
 		//
 		//maybe get rid of it
@@ -98,11 +99,11 @@ int main()
 		activePlayer = &(gameInfo.allPlayers[gameInfo.currentTurn]);
 		//present the players name, pack, and the upper card
 		presentActivePlayerAndUpperCard(activePlayer, upperCard);
-		cardChoice = getCardChoice(activePlayer->packSize);
+		cardChoice = getCardChoice(activePlayer->logPackSize);
 		//add a new card to the player if he chose to
 		if (cardChoice == TAKE_CARD_FROM_DECK)
 		{
-			takeCardFromDeck(activePlayer);
+			getCardFromDeck(activePlayer);
 			advanceTurnToNextPlayer(&gameInfo);
 			continue;
 		}
@@ -116,57 +117,38 @@ int main()
 		putChosenCardOnTopOfDeck(activePlayer,cardChoice ,&upperCard);	
 		//make the move according to the player's choice
 		if (upperCard->type != numberType)
-			makeSpecialCardMove(&gameInfo, upperCard);
+			makeSpecialCardMove(&gameInfo, &upperCard);
 		//give the player to the next player in line
 		advanceTurnToNextPlayer(&gameInfo);
 	}
 	printf("the winner is... %s! Congratulations!\n\n", activePlayer->name);
+	freeAll(&gameInfo);
 	return 0;
-}
-void takeCardFromDeck(Player* activePlayer)
-{
-	int packSizeBeforeAddingCard = activePlayer->packSize;
-	//
-	//change it later to my own realloc!!!
-	//
-	//make space for another card
-	activePlayer->pack = (Card*)realloc(activePlayer->pack, sizeof(Card) * (packSizeBeforeAddingCard + 1));
-	//take another card
-	activePlayer->pack[packSizeBeforeAddingCard] = createCard();
-	(activePlayer->packSize)++;
 }
 void putChosenCardOnTopOfDeck(Player* activePlayer, int cardChoice, Card** upperCard)
 {
-	if(cardChoice != activePlayer->packSize)
-		swapCardsInPack(activePlayer->pack, cardChoice - 1, activePlayer->packSize - 1);
+	//put the chosen card in the end of the cards pack
+	if(cardChoice != activePlayer->logPackSize)
+		swapCardsInPack(activePlayer->pack, cardChoice - 1, activePlayer->logPackSize - 1);
 	//make the chosen card by the player the new upper card
-	*upperCard = &(activePlayer->pack[activePlayer->packSize - 1]);
-	activePlayer->packSize--;
-	//
-	// think how to free it !!!!!!! dont need to decrease the phyiscal size at any point
-	//
+	*upperCard = &(activePlayer->pack[activePlayer->logPackSize - 1]);
+	activePlayer->logPackSize--;
 }
-
 void swapCardsInPack(Card pack[], int index1, int index2)
 {
 	Card temp;
-	copyCard(&temp, pack[index1]);
-	copyCard(&pack[index1], pack[index2]);
-	copyCard(&pack[index2], temp);
+	temp = pack[index1];
+	pack[index1] = pack[index2];
+	pack[index2] = temp;
 }
-void copyCard(Card* destCard, Card sourceCard)
-{
-	destCard->color = sourceCard.color;
-	destCard->type = sourceCard.type;
-	destCard->num = sourceCard.num;
-}
-void makeSpecialCardMove(GameInfo* gameInfoP ,Card* upperCard)
+void makeSpecialCardMove(GameInfo* gameInfoP ,Card** upperCard)
 {
 	//make the move according to whice special card was chosen by the player
-	switch (upperCard->type)
+	switch ((*upperCard)->type)
 	{
 		case(changeDirection):
-			changeDirectionOfGame(gameInfoP);
+			//right = 1, left = -1. if we multiply the current direction by -1 it will change it
+			gameInfoP->direction *= -1;
 			return;
 		case(plus):
 			givePlayerAnotherTurn(gameInfoP);
@@ -181,38 +163,42 @@ void makeSpecialCardMove(GameInfo* gameInfoP ,Card* upperCard)
 			openTaki(gameInfoP, upperCard);
 	}
 }
-void openTaki(GameInfo* gameInfoP, Card* upperCard)
+void openTaki(GameInfo* gameInfoP, Card** upperCard)
 {
-	char openTakiColor = upperCard->color;
+	char openTakiColor = (*upperCard)->color;
 	int takiChoice;
 	Player* activePlayer = &gameInfoP->allPlayers[gameInfoP->currentTurn];
-	presentActivePlayerAndUpperCard(activePlayer, upperCard);
+	presentActivePlayerAndUpperCard(activePlayer, *upperCard);
 	printf("please enter 0 if you want to finish your turn\n\
-or 1 - %d if you want to put one of your cards in the middle\n", activePlayer->packSize);
+or 1 - %d if you want to put one of your cards in the middle\n", activePlayer->logPackSize);
 	scanf(" %d", &takiChoice);
 	//ask the player to put cards on top of the deck until he wants to stop or until a no color card is selected
-	while (takiChoice != 0 && activePlayer->pack[takiChoice - 1].type != changeColor)
+	while (takiChoice != CLOSE_TAKI && activePlayer->pack[takiChoice - 1].type != changeColor)
 	{
-		//if the card that the user wanted to put on the table is not of the same color of the taki, repeat the process
-		if (activePlayer->pack[takiChoice - 1].type != changeColor && activePlayer->pack[takiChoice - 1].color != openTakiColor)
+		//if the card that the user wanted to put on the table is not of the same color of the taki, or if the user typed a card that is nor in range, repeat the process
+		if ((takiChoice < 0 || takiChoice > activePlayer->logPackSize) || (activePlayer->pack[takiChoice - 1].type != changeColor && activePlayer->pack[takiChoice - 1].color != openTakiColor))
 		{
 			printf("Invalid card! Try again.\n");
 			printf("please enter 0 if you want to finish your turn\n\
-or 1 - %d if you want to put one of your cards in the middle\n", activePlayer->packSize);
+or 1 - %d if you want to put one of your cards in the middle\n", activePlayer->logPackSize);
+			scanf(" %d", &takiChoice);
 			continue;
 		}
 		//else put the card on top of the deck and continue the process until the player wants to finish his turn
-		putChosenCardOnTopOfDeck(activePlayer, takiChoice, &upperCard);
-		presentActivePlayerAndUpperCard(activePlayer, upperCard);
+		putChosenCardOnTopOfDeck(activePlayer, takiChoice, upperCard);
+		//if the player used his last card, stop asking for more cards
+		if (activePlayer->logPackSize == EMPTY)
+			break;
+		presentActivePlayerAndUpperCard(activePlayer, *upperCard);
 		printf("please enter 0 if you want to finish your turn\n\
-or 1 - %d if you want to put one of your cards in the middle\n", activePlayer->packSize);
+or 1 - %d if you want to put one of your cards in the middle\n", activePlayer->logPackSize);
 		scanf(" %d", &takiChoice);
 	}
-	//
-	//add the thing that if the last card is a special one then its shoukd do his "thing"!!!
-	//
+	//if the last card in the "open" taki was a special card, activate the card
+	if ((*upperCard)->type != numberType)
+		makeSpecialCardMove(gameInfoP, upperCard);
 }
-void changeColorOfGame(GameInfo* gameInfoP, Card* upperCard)
+void changeColorOfGame(GameInfo* gameInfoP, Card** upperCard)
 {
 	int colorChoice;
 	printf("please enter your color choice:\n1 - Red\n2 - Blue\n3 - Green\n4 - Yellow\n");
@@ -221,31 +207,24 @@ void changeColorOfGame(GameInfo* gameInfoP, Card* upperCard)
 	switch (colorChoice)
 	{
 	case(1):
-		upperCard->color = RED_COLOR;
+		(*upperCard)->color = RED_COLOR;
 		break;
 	case(2):
-		upperCard->color = BLUE_COLOR;
+		(*upperCard)->color = BLUE_COLOR;
 		break;
 	case(3):
-		upperCard->color = GREEN_COLOR;
+		(*upperCard)->color = GREEN_COLOR;
 		break;
 	case(4):
-		upperCard->color = YELLOW_COLOR;
+		(*upperCard)->color = YELLOW_COLOR;
 		break;
 	default:
 		printf("error, try again\n");
 		changeColorOfGame(gameInfoP, upperCard);
 		return;
 	}
-	upperCard->type = changeColor;
-	upperCard->num = SPECIAL_CARD_TYPE;
-}
-void changeDirectionOfGame(GameInfo* gameInfoP)
-{
-	if (gameInfoP->direction == RIGHT)
-		gameInfoP->direction = LEFT;
-	else
-		gameInfoP->direction = RIGHT;
+	(*upperCard)->type = changeColor;
+	(*upperCard)->num = SPECIAL_CARD_TYPE;
 }
 void givePlayerAnotherTurn(GameInfo* gameInfoP)
 {
@@ -254,6 +233,9 @@ void givePlayerAnotherTurn(GameInfo* gameInfoP)
 		gameInfoP->currentTurn--;
 	else
 		gameInfoP->currentTurn++;
+	//if the player used the stop card as his last card
+	if(gameInfoP->allPlayers[gameInfoP->currentTurn].logPackSize == EMPTY)
+		getCardFromDeck(&gameInfoP->allPlayers[gameInfoP->currentTurn]);
 }
 void stopNextPlayer(GameInfo* gameInfoP)
 {
@@ -262,6 +244,24 @@ void stopNextPlayer(GameInfo* gameInfoP)
 		gameInfoP->currentTurn++;
 	else
 		gameInfoP->currentTurn--;
+	//if the stop card that the player used is his last card + there are only 2 players in game, give him another card
+	if (gameInfoP->numOfPlayers == 2 && gameInfoP->allPlayers[gameInfoP->currentTurn].logPackSize == EMPTY)
+		getCardFromDeck(&gameInfoP->allPlayers[gameInfoP->currentTurn]);
+}
+void getCardFromDeck(Player* activePlayer)
+{
+	//make space for another card
+	if (activePlayer->logPackSize == activePlayer->phyPackSize)
+	{
+		Card* temp;
+		activePlayer->phyPackSize *= 2;
+		temp = (Card*)realloc(activePlayer->pack,activePlayer->phyPackSize * sizeof(Card));
+		checkIfAllocationSuccessful((void*)temp);
+		activePlayer->pack = temp;
+	}
+	//take another card
+	activePlayer->pack[activePlayer->logPackSize] = createNewCard();
+	activePlayer->logPackSize++;
 }
 bool isMoveValid(Card chosenCard, Card* upperCard)
 {
@@ -296,7 +296,7 @@ or 1 - %d if you want to put one of your cards in the middle:\n",TAKE_CARD_FROM_
 }
 void presentActivePlayerAndUpperCard(Player* activePlayer, Card* upperCard)
 {
-	printf("Upper card:\n");
+	printf("\nUpper card:\n");
 	printCard(upperCard);
 	printf("%s's turn:\n\n", activePlayer->name);
 	printPack(activePlayer);
@@ -336,10 +336,10 @@ void updateCurrentTurn(GameInfo* gameInfoP)
 Card createStartingCard()
 {
 	Card startingCard;
-	startingCard = createCard();
+	startingCard = createNewCard();
 	//starting card has to be a number card
 	while (startingCard.type != numberType)
-		startingCard = createCard();
+		startingCard = createNewCard();
 	return startingCard;
 }
 void printCard(Card* card)
@@ -366,26 +366,16 @@ void printCard(Card* card)
 		printf(" COLOR ");
 		break;
 	}
-	printf("*\n*   %c   *\n*       *\n*********\n", card->color);
+	printf("*\n*   %c   *\n*       *\n*********\n\n", card->color);
 }
 void printPack(Player* player)
 {
 	int i;
-	for (i = 0; i < player->packSize; i++)
+	for (i = 0; i < player->logPackSize; i++)
 	{
 		printf("Card #%d:\n", i + 1);
 		printCard(&player->pack[i]);
 	}
-}
-int getRandomSpecialCardType()
-{
-	//return a number between 1 and 5 which represent the card type
-	return (rand() % (NUMBER_OF_TYPES - 1)) + 1;
-}
-int getRandomCardNum()
-{
-	//return a number between 0 and 9 which represent the card number
-	return (rand() % 10);
 }
 char getRandomCardColor()
 {
@@ -402,7 +392,7 @@ char getRandomCardColor()
 			return GREEN_COLOR;
 	}
 }
-Card createCard()
+Card createNewCard()
 {
 	Card newCard;
 	//get type of card
@@ -417,20 +407,6 @@ Card createCard()
 		newCard.num = (rand() % 9) + 1;
 	else
 		newCard.num = SPECIAL_CARD_TYPE;
-	/*
-	//get number of card
-	newCard.num = getRandomCardNum();
-	//get type of card
-	if (newCard.num == SPECIAL_CARD_TYPE)
-		newCard.type = getRandomSpecialCardType();
-	else
-		newCard.type = numberType;
-	//get color of card
-	if (newCard.type == changeColor)
-		newCard.color = NO_COLOR;
-	else
-		newCard.color = getRandomCardColor();
-	*/
 	return newCard;
 }
 void givePlayerNewPack(Player* player)
@@ -438,17 +414,18 @@ void givePlayerNewPack(Player* player)
 	int i;
 	//allocate a new array of cards
 	player->pack = (Card*)malloc(PACK_SIZE_IN_START * sizeof(Card));
-	player->packSize = PACK_SIZE_IN_START;
+	checkIfAllocationSuccessful((void*)player->pack);
+	player->logPackSize = PACK_SIZE_IN_START;
+	player->phyPackSize = PACK_SIZE_IN_START;
 	//fill the pack with new random cards
-	for (i = 0; i < player->packSize; i++)
-		player->pack[i] = createCard();
+	for (i = 0; i < player->logPackSize; i++)
+		player->pack[i] = createNewCard();
 }
 void getPlayersInfo(GameInfo* game)
 {
 	int i;
 	for (i = 0; i < game->numOfPlayers; i++)
 	{
-		//remove ?????????????? game->allPlayers[i] = (Player*)malloc(sizeof(Player));
 		printf("please enter the first name of player #%d:\n", i+1);
 		scanf(" %s", game->allPlayers[i].name);
 		givePlayerNewPack(&(game->allPlayers[i]));
@@ -468,11 +445,27 @@ int getNumOfPlayers()
 	}
 	return num;
 }
+void checkIfAllocationSuccessful(void* pointer)
+{
+	if (pointer == NULL)
+	{
+		printf("memory allocation failed");
+		exit(1);
+	}
+}
+void freeAll(GameInfo* gameInfoP)
+{
+	int i;
+	for (i = 0; i < gameInfoP->numOfPlayers; i++)
+		free(gameInfoP->allPlayers[i].pack);
+	free(gameInfoP->allPlayers);
+}
 void getGameInfo(GameInfo* gameInfoP)
 {
 	gameInfoP->numOfPlayers = getNumOfPlayers();
 	//make a dynamic array of players
 	gameInfoP->allPlayers = (Player*)malloc(gameInfoP->numOfPlayers * sizeof(Player));
+	checkIfAllocationSuccessful((void*)gameInfoP->allPlayers);
 	//get the info of all the players
 	getPlayersInfo(gameInfoP);
 	//start the game with the first player and with the game going in clock wise direction
